@@ -22,6 +22,15 @@ from django.conf import settings
 
 base_dir = settings.MEDIA_ROOT
 
+# Function to sanitize paths to prevent path traversal attacks
+def sanitize_path(path):
+    # Normalize path to remove ../ or similar components
+    safe_path = os.path.normpath(path)
+    # Ensure path does not start with '/' or drive letters to prevent absolute paths
+    if safe_path.startswith(("/", "\\")) or (":" in safe_path and safe_path[1] == ":"):
+        raise ValueError("Invalid path")
+    return safe_path
+    
 def errors(request):
     return render(request, 'DataBase/error.html')
 
@@ -434,6 +443,8 @@ def fileUploader(request):
         file = request.FILES['file'].read()
         fileName =  os.path.basename(request.POST['filename'])
         existingPath = request.POST['existingPath']
+        # Sanitize the 'existingPath' to ensure it's a relative path not escaping its intended boundaries
+        existingPath = sanitize_path(existingPath)
         end = request.POST['end']
         nextSlice = request.POST['nextSlice']
 
