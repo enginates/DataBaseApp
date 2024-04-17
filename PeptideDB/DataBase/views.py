@@ -506,47 +506,70 @@ def UploadedView(request):
 
 @csrf_exempt
 def upload_chunk(request):
-
     file = request.FILES['file']
-
     file_id = request.POST['resumableIdentifier']
     chunk_number = request.POST['resumableChunkNumber']
     total_chunks = int(request.POST['resumableTotalChunks'])
 
-    directory_path = settings.MEDIA_ROOT+"/"+'tmp'
+    # Sanitize the file_id and chunk_number to prevent path traversal
+    safe_file_id = ''.join([c for c in file_id if c.isalnum()])
+    safe_chunk_number = ''.join([c for c in chunk_number if c.isdigit()])
+
+    # Construct the directory path securely
+    directory_path = os.path.join(settings.MEDIA_ROOT, 'tmp')
     if not os.path.exists(directory_path):
         os.makedirs(directory_path)
 
-    print(settings.MEDIA_ROOT+"/"+'tmp'+file_id+"_"+chunk_number)
-    
-    with open(settings.MEDIA_ROOT+"/"+'tmp'+"/"+file_id+"_"+chunk_number, 'wb') as f:
+    # Construct the file path securely
+    file_path = os.path.join(directory_path, f"{safe_file_id}_{safe_chunk_number}")
+
+    # Safely write the file chunks
+    with open(file_path, 'wb') as f:
         for chunk in file.chunks():
-            # print("###", chunk)
             f.write(chunk)
 
     return JsonResponse({'status': 'success'})
 
 @csrf_exempt
 def merge_chunks(request):
-
     file_id = request.GET.get('file_id', None)
     total_chunck = request.GET.get('total_chunck', None)
     file_name = request.GET.get('file_name', None)
 
-    directory_path = settings.UPLOAD_BACKUP
+    if not file_id or not total_chunck or not file_name:
+        # Handle the case where any parameter is None
+        return HttpResponseRedirect('/error/?message=' + quote('Missing parameters'))
+
+    # Sanitize the file_name to avoid path traversal
+    file_name = os.path.basename(file_name)
+
+    # Secure directory path
+    directory_path = os.path.join(settings.UPLOAD_BACKUP, '')
     if not os.path.exists(directory_path):
         os.makedirs(directory_path)
 
-    print( total_chunck)
-  
-    with open(directory_path+"/"+file_name, 'wb') as final_file:
-        for i in range(1, int(total_chunck) + 1):
-            print(total_chunck)
-            with open(settings.MEDIA_ROOT+'/'+'tmp'+'/'+file_id+'_'+str(i), 'rb') as chunk:
-                final_file.write(chunk.read())
-            os.remove(settings.MEDIA_ROOT+'/'+'tmp'+'/'+file_id+'_'+str(i))
+    final_path = os.path.join(directory_path, file_name)
+    tmp_dir = os.path.join(settings.MEDIA_ROOT, 'tmp', '')
 
-    return HttpResponseRedirect('/load_backupdata/?&file_name='+file_name)
+    try:
+        with open(final_path, 'wb') as final_file:
+            for i in range(1, int(total_chunck) + 1):
+                chunk_name = f'{file_id}_{i}'
+                chunk_path = os.path.join(tmp_dir, chunk_name)
+                
+                if not os.path.exists(chunk_path):
+                    # Handle missing chunk file
+                    return HttpResponseRedirect('/error/?message=' + quote('Missing chunk number ' + str(i)))
+
+                with open(chunk_path, 'rb') as chunk:
+                    final_file.write(chunk.read())
+                os.remove(chunk_path)
+
+    except IOError as e:
+        # Handle general IO errors (e.g., disk full, file not found, etc.)
+        return HttpResponseRedirect('/error/?message=' + quote(str(e)))
+
+    return HttpResponseRedirect('/load_backupdata/?file_name=' + quote(file_name))
 
 @staff_member_required
 def upload_page(request):
